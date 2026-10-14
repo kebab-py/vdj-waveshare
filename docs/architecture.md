@@ -29,11 +29,12 @@ Lessons from testing:
 
 - Script queries without a deck prefix return data of the calling deck. All queries go through `q()` / `qs()`, which add `deck N`.
 - Before pre-load scans audio, `preloadCheck()` compares 1024 frames from both decks. Identical audio means VirtualDJ returns the caller's audio, and pre-load switches itself off. The result goes to `server.log`.
+- Confirmed on real VirtualDJ on 13 Oct 2026: `server.log` showed `plugin: preload OK` and a paused deck's waveform finished without touching it.
 - When no deck plays, no deck effect runs. WaveShare Clock covers that case, see below.
 
 ### Master clock: `plugin/WaveShareClock.cpp`
 
-A second, tiny plugin (`IVdjPluginDsp8`) for the master effect slot. VirtualDJ calls master effects about 100 times per second even while every deck is paused (measured with a probe on 14 Oct 2026, `deck N` queries returned the paused deck's length and BPM).
+A second, tiny plugin (`IVdjPluginDsp8`) for the master effect slot. VirtualDJ calls master effects about 100 times per second even while every deck is paused (measured with a probe on 14 Oct 2026, `deck N` queries returned the paused deck's length and BPM). Confirmed working on real VirtualDJ the same day.
 
 - Its own thread finds the loaded WaveShare bundle among the process images (`dlopen` with `RTLD_NOLOAD`, which also keeps it loaded) and looks up `WaveShareClockTick`.
 - The master audio thread calls `WaveShareClockTick()`. It ticks every deck whose own audio thread has been idle for 200 ms, exactly like pre-load: metadata, track detection, scanning.
@@ -69,4 +70,5 @@ Single file, no build step, no libraries.
 | VirtualDJ wiki lists `Documents/VirtualDJ/PluginsArm` as plugin folder | Wrong on current versions. Real path: `~/Library/Application Support/VirtualDJ/PluginsMacArm/SoundEffect` |
 | Units of `get_loop_in_time` | Assumed ms, not verified with pitch ≠ 0 |
 | `SCALE` in the plugin | Set by eye |
+| A track loaded while no deck plays (typical first track of a set) stayed empty until a deck played. VirtualDJ never calls a paused deck's effect | Fixed by WaveShare Clock on the master (confirmed on real VirtualDJ, 14 Oct 2026). Without it: play any deck, even in the headphones |
 | Windows | No build yet |
