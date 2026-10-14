@@ -12,7 +12,7 @@ NEW=$(git rev-parse origin/main)
 
 # plugin/.installed holds the commit of the last install. Missing or unknown = rebuild to be safe.
 MARK=plugin/.installed
-SRC="plugin/WaveShare.cpp plugin/Info.plist plugin/build.sh"
+SRC="plugin/WaveShare.cpp plugin/WaveShareClock.cpp plugin/Info.plist plugin/build.sh"
 LAST=$(cat "$MARK" 2>/dev/null || true)
 PLUGIN=0
 if [ -z "$LAST" ] || ! git cat-file -e "$LAST^{commit}" 2>/dev/null || ! git diff --quiet "$LAST" "$NEW" -- $SRC; then PLUGIN=1; fi
@@ -32,7 +32,7 @@ fi
 
 echo
 changed() { ! git diff --quiet "$OLD" "$NEW" -- "$@"; }
-[ $PLUGIN = 1 ] && echo "VirtualDJ: plugin updated, start VirtualDJ and switch WaveShare on." || echo "VirtualDJ: no restart needed."
+[ $PLUGIN = 1 ] && echo "VirtualDJ: plugins updated, start VirtualDJ, WaveShare on the decks, WaveShare Clock on the master." || echo "VirtualDJ: no restart needed."
 if changed server/server.js; then
   pgrep -f server/server.js >/dev/null && echo "Server: RESTART needed (Ctrl+C, then node server/server.js)." \
     || echo "Server: updated, start it with node server/server.js."
