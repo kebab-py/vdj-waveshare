@@ -64,12 +64,13 @@ VirtualDJ ─ WaveShare plugin ─▶ UDP :7778 ─▶ server.js ─▶ HTTP/SSE
 ```
 plugin/   WaveShare.cpp (deck effect) and WaveShareClock.cpp (master effect), C++17, build and test scripts
 server/   server.js (Node, no dependencies) and index.html (dashboard, single file)
-tools/    udp-test.js: prints raw plugin output
+tools/    update.sh: pull main, rebuild plugin if needed; udp-test.js: prints raw plugin output
 docs/     docs and the project landing page (GitHub Pages)
 ```
 
 | Task | Command |
 | --- | --- |
+| Update the DJ laptop to latest main | `tools/update.sh` |
 | Test plugin logic without VirtualDJ | `plugin/test.sh` |
 | Build without installing | `plugin/build.sh --no-install` |
 | Inspect plugin output | `node tools/udp-test.js` (server stopped) |
