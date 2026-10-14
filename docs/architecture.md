@@ -47,7 +47,7 @@ Node 18+, no npm packages.
 - Merges UDP packets per deck. A new `trackId` resets the column array and bumps `rev`.
 - Computes playback speed (pitch) from the last second of positions and extrapolates the position to send time.
 - Deck states: `live` (fresh metadata), `pause` (positions arrive, metadata stale), `off` (nothing arrives).
-- Writes events to `server/server.log`: track changes, finished waveforms, pre-load result, loops, plugin silence.
+- Writes events to `server/server.log` with local date and time: track changes, finished waveforms, pre-load result, loops, plugin silence.
 - Network Control fallback exists but is off (`vdjUrl: ''`). See Known issues.
 
 ## Dashboard: `server/index.html`

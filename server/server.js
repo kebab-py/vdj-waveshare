@@ -62,7 +62,8 @@ async function poll(deck, fields) {               // postupne, nikdy viac požia
 // Log udalostí do server.log vedľa servera: zmeny skladieb, výpadky pluginu, pre-load. Číta ho aj Claude.
 const LOG = path.join(__dirname, 'server.log');
 function log(...a) {
-  const line = `${new Date().toISOString().slice(11, 23)} ${a.join(' ')}`;
+  const d = new Date(), local = new Date(d - d.getTimezoneOffset() * 60000);   // local time, not UTC
+  const line = `${local.toISOString().slice(0, 23).replace('T', ' ')} ${a.join(' ')}`;
   console.log(line);
   fs.appendFile(LOG, line + '\n', () => {});
 }
