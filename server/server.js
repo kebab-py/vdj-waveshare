@@ -121,7 +121,7 @@ loop(CONFIG.publishMs, async () => {
       watch(d, 'preload', m.preload);
       watch(d, 'loop', m.loop ? `${m.loop.in.toFixed(2)}-${m.loop.out.toFixed(2)}s ${m.loop.beats}b` : null);
       Object.assign(s, { title: m.title, artist: m.artist, key: m.key, bpm: m.bpm || null, length: m.len || null,
-        playing: mode === 'live' && m.playing, audible: m.audible, loop: m.loop });
+        playing: mode === 'live' && m.playing, audible: m.audible, loop: m.loop, grid: m.grid });
     }
     if (mode === 'off' && !httpOnline) s.playing = false;           // nič nevieme: zastaviť playhead, nie hádať
     // Počas prehrávania presná pozícia z pluginu, dopočítaná na čas odoslania.
@@ -174,7 +174,7 @@ udp.on('message', b => {
     h.push([now, sec]);
     while (h.length > 2 && now - h[0][0] > 1000) h.shift();
     if (now - h[0][0] > 200) w.rate = (sec - h[0][1]) / (now - h[0][0]) * 1000;
-    w.sec = sec; w.at = now;
+    w.sec = sec; w.at = now; w.sr = sr || 44100;
     if (total && scanned === total && w.doneId !== id) { w.doneId = id; log(`deck ${deck}`, `waveform skladby #${id} hotový`); }
     s.scanned = scanned;
   } else if (b[5] === 3 && b.length >= 43) {
@@ -182,7 +182,11 @@ udp.on('message', b => {
     const str = () => { const n = b[o]; const t = b.toString('utf8', o + 1, o + 1 + n); o += 1 + n; return t; };
     const f = i => b.readFloatLE(20 + 4 * i), flags = b[12];
     const title = str(), artist = str(), key = str();
+    // beat grid after the strings (older plugins stop here): beat 0 and beat length in samples
+    const sr = w.sr || 44100, gb = o + 8 <= b.length ? b.readUInt32LE(o + 4) : 0;
+    const grid = gb ? { first: b.readInt32LE(o) / sr, beat: gb / sr } : null;
     w.meta = {
+      grid,
       t: performance.now() - b.readUInt32LE(16), title, artist, key,
       playing: !!(flags & 1), audible: !!(flags & 2), bpm: f(0), len: f(1),
       preload: flags & 8 ? 'ok' : flags & 16 ? 'vypnutý (VDJ vracia audio iného decku)' : 'neoverený',

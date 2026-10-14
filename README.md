@@ -14,11 +14,12 @@ Works with streaming (TIDAL), since the plugin reads the decoded audio inside Vi
 - Zoom from 2 to 64 seconds, by buttons, mouse wheel or pinch
 - Two views: MIX (bands overlaid) and PÁSMA (bands in separate lanes)
 - Energy strip: dark for breakdowns, bright green for drops
-- BPM as the largest number, plus key, tempo and time left
+- BPM as the largest number in the deck color, plus key, tempo and time left
+- Beat lines synced with the VirtualDJ beat grid, bars brighter
 - Loop region with length in beats
 - 2 or 4 decks, colored like VirtualDJ: red, blue, green, orange
 - Pre-load: a track on a paused deck gets scanned while another deck plays, or anytime with WaveShare Clock on the master
-- Phone, tablet and desktop layouts
+- Phone, tablet and desktop layouts, made for touch: pinch zoom, double tap reset, full screen
 - Cable or Wi-Fi: serves on every adapter, or pick one with `--iface`
 - No cloud, no accounts, no npm packages
 
@@ -82,7 +83,7 @@ VirtualDJ ─ WaveShare plugin ─▶ UDP :7778 ─▶ server.js ─▶ HTTP/SSE
 ```
 plugin/   WaveShare.cpp (deck effect) and WaveShareClock.cpp (master effect), C++17, build and test scripts
 server/   server.js (Node, no dependencies) and index.html (dashboard, single file)
-tools/    update.sh: pull main, rebuild plugin if needed; udp-test.js: prints raw plugin output
+tools/    update.sh: pull main, rebuild plugin if needed; simulate.js: plays audio files as fake decks; udp-test.js: prints raw plugin output
 docs/     docs and the project landing page (GitHub Pages)
 ```
 
@@ -91,6 +92,7 @@ docs/     docs and the project landing page (GitHub Pages)
 | Update the DJ laptop to latest main | `tools/update.sh` |
 | Test plugin logic without VirtualDJ | `plugin/test.sh` |
 | Build without installing | `plugin/build.sh --no-install` |
+| Test server and dashboard without VirtualDJ | `node tools/simulate.js --demo` or `node tools/simulate.js a.mp3 b.wav` |
 | Inspect plugin output | `node tools/udp-test.js` (server stopped) |
 | Check VirtualDJ script queries | `node server/server.js --test "get_bpm"` (needs Network Control) |
 

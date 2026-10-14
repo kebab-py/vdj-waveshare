@@ -47,6 +47,10 @@ New columns go first. Otherwise the sender cycles through the whole track, so a 
 | 16-19 | ageMs | `uint32`, age of the data in the plugin |
 | 20-39 | bpm, length s, loopIn s, loopOut s, loopBeats | `float32` × 5 |
 | 40+ | title, artist, key | 3 × (`uint8` length + UTF-8 bytes) |
+| after key | firstBeat | `int32`, sample position of the song's first beat (beat 0), can be negative |
+| +4 | beatLen | `uint32`, samples per beat. `0` = no grid yet |
+
+The beat grid comes from VirtualDJ's `SongPosBeats` and `SongBpm`, read in the deck's own audio calls. A paused deck sends `0` until it plays once, also when WaveShare Clock drives it. Positions are track samples, like `songPos`. Older plugins end the packet after the key, the server then shows no beat lines.
 
 ### Type 4: log line
 
@@ -66,7 +70,7 @@ Port `7777`, on every adapter by default. `--iface` limits it to one, see README
 | Route | Returns |
 | --- | --- |
 | `GET /` | `server/index.html` |
-| `GET /events` | SSE. Default event: full state JSON, 10 per second, with `net: {kind, name, ip}` for the adapter in use (`cable`, `wifi`, `other`) when the server runs on one adapter (`--iface`), absent with `all`. Event `wave`: `{deck, rev, start, data}` with changed columns as base64 |
+| `GET /events` | SSE. Default event: full state JSON, 10 per second, `grid: {first, beat}` in seconds per deck (`null` without a grid), and `net: {kind, name, ip}` for the adapter in use (`cable`, `wifi`, `other`) when the server runs on one adapter (`--iface`), absent with `all`. Event `wave`: `{deck, rev, start, data}` with changed columns as base64 |
 | `GET /wave/:deck` | Binary: `total × 3` bytes of columns, then `total` bytes of "computed" flags. Header `X-Rev` |
 
 A browser fetches `/wave/:deck` when `rev` changes, then applies `wave` events on top.
