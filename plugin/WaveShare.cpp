@@ -30,6 +30,15 @@ static std::atomic<int> g_preloadOk{0};       // 0 neoverené, 1 funguje, -1 VDJ
 static std::atomic<WaveShare*> g_decks[8];
 static std::atomic<int> g_inTick{0};          // koľko audio vlákien práve siaha na cudzie inštancie
 
+// Master clock: VirtualDJ calls effects on the master output even while every deck is paused (probe, 14 Oct 2026),
+// but never calls a paused deck's Buffer DSP. WaveShareClock (plugin/WaveShareClock.cpp, its own bundle on the
+// master) calls WaveShareClockTick() from the master audio thread, which drives idle decks the way pre-load does.
+static const bool MASTER_CLOCK = true;        // false = ignore WaveShareClock
+extern "C" __attribute__((visibility("default"))) void WaveShareClockTick();
+static long long nowMs() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
 class WaveShare : public IVdjPluginBufferDsp8 {
 public:
     HRESULT VDJ_API OnLoad() override {
@@ -57,6 +66,7 @@ public:
 
     short* VDJ_API OnGetSongBuffer(int songPos, int nb) override {
         playPos.store(songPos, std::memory_order_relaxed);
+        ownAt.store(nowMs(), std::memory_order_relaxed);
         if (!busy.test_and_set()) {                                          // analýza PRED výstupom
             checkTrack(songPos);
             if (total.load() > 0 && scanned.load() < total.load()) scanChunk();
@@ -70,6 +80,8 @@ public:
     }
 
 private:
+    friend void WaveShareClockTick();
+    std::atomic<long long> ownAt{0};          // last call from this deck's own audio thread
     uint8_t* bins = nullptr;
     int deck = 1;
 
@@ -335,6 +347,25 @@ private:
         close(s);
     }
 };
+
+// Master audio thread, about 100x per second. Only decks whose own audio thread is idle (paused deck)
+// get ticked, so a playing deck keeps its exact position. busy keeps one thread per deck at a time.
+// ponytail: scans also while the pre-load audio check is still pending (nothing played yet this session),
+// since audio from a foreign VirtualDJ thread was confirmed correct on 13 Oct; a failed check (-1) stops it.
+void WaveShareClockTick() {
+    if (!MASTER_CLOCK) return;
+    static std::atomic<bool> seen{false};
+    g_inTick++;
+    long long now = nowMs();
+    for (auto& g : g_decks) {
+        WaveShare* o = g.load();
+        if (!o || now - o->ownAt.load(std::memory_order_relaxed) < 200 || o->busy.test_and_set()) continue;
+        if (!seen.exchange(true)) o->dlog("master clock: bezi");
+        o->tickRemote(g_preloadOk.load() != -1);
+        o->busy.clear();
+    }
+    g_inTick--;
+}
 
 HRESULT VDJ_API DllGetClassObject(const GUID& rclsid, const GUID& riid, void** ppObject) {
     if (memcmp(&rclsid, &CLSID_VdjPlugin8, sizeof(GUID)) != 0) return CLASS_E_CLASSNOTAVAILABLE;

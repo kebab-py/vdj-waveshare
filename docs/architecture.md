@@ -29,7 +29,16 @@ Lessons from testing:
 
 - Script queries without a deck prefix return data of the calling deck. All queries go through `q()` / `qs()`, which add `deck N`.
 - Before pre-load scans audio, `preloadCheck()` compares 1024 frames from both decks. Identical audio means VirtualDJ returns the caller's audio, and pre-load switches itself off. The result goes to `server.log`.
-- When no deck plays, nothing runs. The dashboard shows the last known state.
+- When no deck plays, no deck effect runs. WaveShare Clock covers that case, see below.
+
+### Master clock: `plugin/WaveShareClock.cpp`
+
+A second, tiny plugin (`IVdjPluginDsp8`) for the master effect slot. VirtualDJ calls master effects about 100 times per second even while every deck is paused (measured with a probe on 14 Oct 2026, `deck N` queries returned the paused deck's length and BPM).
+
+- Its own thread finds the loaded WaveShare bundle among the process images (`dlopen` with `RTLD_NOLOAD`, which also keeps it loaded) and looks up `WaveShareClockTick`.
+- The master audio thread calls `WaveShareClockTick()`. It ticks every deck whose own audio thread has been idle for 200 ms, exactly like pre-load: metadata, track detection, scanning.
+- Switch: `MASTER_CLOCK` in `WaveShare.cpp`. If the pre-load audio check fails (`-1`), the clock stops scanning audio too.
+- The first tick writes `plugin: master clock: bezi` to `server.log`.
 
 ## Server: `server/server.js`
 

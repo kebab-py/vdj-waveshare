@@ -38,14 +38,26 @@ std::vector<uint8_t> dump(int deck, int bins) {
   std::vector<uint8_t> d(bins * 3); assert(fread(d.data(), 3, bins, f) == (size_t)bins); fclose(f);
   return d;
 }
-int main(int argc, char**) {
-  contaminate = argc > 1;                              // ./host_test x = test vypnutia pre-loadu
+int main(int argc, char** argv) {
+  bool clock = argc > 1 && !strcmp(argv[1], "clock");  // ./host_test clock = both decks paused, master clock only
+  contaminate = argc > 1 && !clock;                    // ./host_test x = test vypnutia pre-loadu
   remove("/tmp/waveshare_deck1.bin"); remove("/tmp/waveshare_deck2.bin");
   CB cb1(1, 60, true), cb2(2, 30, false);
   cb1p = &cb1;
   auto* p1 = new WaveShare(); p1->cb = &cb1; p1->SampleRate = SR;
   auto* p2 = new WaveShare(); p2->cb = &cb2; p2->SampleRate = SR;
   p1->OnLoad(); p1->OnStart(); p2->OnLoad(); p2->OnStart();
+  if (clock) {                                         // VirtualDJ never calls the decks, only the master effect
+    for (int i = 0; i < 600; i++) { WaveShareClockTick(); usleep(5000); }
+    usleep(300000);
+    auto d = dump(1, 6000), e = dump(2, 3000);
+    printf("clock: deck1 bin 1000 low %d, deck2 bin 1500 high %d\n", d[3000], e[4502]);
+    assert(d[3000] > 100 && d[3002] < 20 && d[15002] > 100);   // deck 1: bass, then highs
+    assert(e[4502] > 100);                                      // deck 2: highs
+    p1->OnStop(); p2->OnStop(); p1->Release(); p2->Release();
+    puts("OK (master clock)");
+    return 0;
+  }
   int pos = 20 * SR;                                   // deck 1 začne v strede: test wrapu
   for (int i = 0; i < 600; i++) { assert(p1->OnGetSongBuffer(pos, 512)); pos += 512; usleep(5000); }
   usleep(300000);
