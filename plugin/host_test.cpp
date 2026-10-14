@@ -41,6 +41,10 @@ std::vector<uint8_t> dump(int deck, int bins) {
 int main(int argc, char** argv) {
   bool clock = argc > 1 && !strcmp(argv[1], "clock");  // ./host_test clock = both decks paused, master clock only
   contaminate = argc > 1 && !clock;                    // ./host_test x = test vypnutia pre-loadu
+  // beat grid: beat 0 at 1.0 s, 120 BPM (22050 samples per beat)
+  assert(beatAnchor(44100 + 2 * 22050, 2.0, 22050) == 44100);   // 2 beats after beat 0
+  assert(beatAnchor(11025, 0.5, 22050) == 0);                    // half a beat in
+  assert(beatAnchor(0, 3.25, 22050) == -71663);                 // first beat after the track start, rounded
   remove("/tmp/waveshare_deck1.bin"); remove("/tmp/waveshare_deck2.bin");
   CB cb1(1, 60, true), cb2(2, 30, false);
   cb1p = &cb1;
