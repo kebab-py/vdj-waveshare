@@ -64,7 +64,7 @@ VirtualDJ ─ WaveShare plugin ─▶ UDP :7778 ─▶ server.js ─▶ HTTP/SSE
 ```
 plugin/   WaveShare.cpp (deck effect) and WaveShareClock.cpp (master effect), C++17, build and test scripts
 server/   server.js (Node, no dependencies) and index.html (dashboard, single file)
-tools/    update.sh: pull main, rebuild plugin if needed; udp-test.js: prints raw plugin output
+tools/    update.sh: pull main, rebuild plugin if needed; simulate.js: plays audio files as fake decks; udp-test.js: prints raw plugin output
 docs/     docs and the project landing page (GitHub Pages)
 ```
 
@@ -73,6 +73,7 @@ docs/     docs and the project landing page (GitHub Pages)
 | Update the DJ laptop to latest main | `tools/update.sh` |
 | Test plugin logic without VirtualDJ | `plugin/test.sh` |
 | Build without installing | `plugin/build.sh --no-install` |
+| Test server and dashboard without VirtualDJ | `node tools/simulate.js --demo` or `node tools/simulate.js a.mp3 b.wav` |
 | Inspect plugin output | `node tools/udp-test.js` (server stopped) |
 | Check VirtualDJ script queries | `node server/server.js --test "get_bpm"` (needs Network Control) |
 

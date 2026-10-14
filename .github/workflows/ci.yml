@@ -17,7 +17,7 @@ jobs:
         with:
           node-version: 22
       - name: Check server syntax
-        run: node --check server/server.js && node --check tools/udp-test.js
+        run: node --check server/server.js && node --check tools/udp-test.js && node --check tools/simulate.js
       - name: Build plugin
         run: plugin/build.sh --no-install
       - name: Test plugin logic
