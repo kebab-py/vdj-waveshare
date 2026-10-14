@@ -23,6 +23,13 @@ static const float SCALE = 2.f;              // ponytail: column height calibrat
 
 // Pre-load: a playing deck also scans tracks on paused decks (VirtualDJ calls the plugin only while its deck plays).
 class WaveShare;
+
+// Beat grid: sample position of beat 0 (the song's first beat) from VirtualDJ's SongPosBeats
+// (beats since the first beat) and SongBpm (samples per beat). Can be negative or past the start.
+static int32_t beatAnchor(int songPos, double posBeats, int samplesPerBeat) {
+    return (int32_t)(songPos - std::llround(posBeats * samplesPerBeat));
+}
+
 static const bool PRELOAD = true;             // false = pre-load off completely
 // Test 13 Oct: VirtualDJ queries without "deck N" from another deck's audio thread returned the calling deck's data.
 // So every query goes through q()/qs() with an explicit "deck N", and the audio is checked before pre-load (preloadCheck).
@@ -67,6 +74,10 @@ public:
     short* VDJ_API OnGetSongBuffer(int songPos, int nb) override {
         playPos.store(songPos, std::memory_order_relaxed);
         ownAt.store(nowMs(), std::memory_order_relaxed);
+        if (SongBpm > 0) {                                                  // VDJ fills these before each call
+            gridFirst.store(beatAnchor(songPos, SongPosBeats, SongBpm), std::memory_order_relaxed);
+            gridBeat.store(SongBpm, std::memory_order_relaxed);
+        }
         if (!busy.test_and_set()) {                                          // analysis BEFORE output
             checkTrack(songPos);
             if (total.load() > 0 && scanned.load() < total.load()) scanChunk();
@@ -100,6 +111,9 @@ private:
     // shared with the sender thread
     std::atomic<int> playPos{0}, sampleRate{44100}, total{0}, start{0}, scanned{0};
     std::atomic<uint32_t> trackId{0};
+    // ponytail: grid only from this deck's own audio calls; a paused deck gets lines once it plays
+    std::atomic<int32_t> gridFirst{0};
+    std::atomic<int> gridBeat{0};                 // samples per beat, 0 = no grid
     std::atomic<bool> running{false};
     std::atomic_flag busy = ATOMIC_FLAG_INIT;   // only one thread at a time owns the scan state
 
@@ -151,6 +165,7 @@ private:
         resetFilter();
         scanBin = st; scanPos = st * perBin;                        // first from the playhead to the end
         sampleRate.store(sr); start.store(st); total.store(tot);
+        gridBeat.store(0);                                          // old grid does not fit the new track
         trackId.fetch_add(1);
     }
 
@@ -286,7 +301,7 @@ private:
         int sent = 0, ring = 0;                                     // in scan order from `start`
         bool dumped = false;
         int tick = 0;
-        uint8_t mp[12 + 28 + 3 * 201];
+        uint8_t mp[12 + 28 + 3 * 201 + 8];
         while (running.load()) {
             uint32_t id = trackId.load(std::memory_order_acquire);
             int tot = total.load(), st = start.load(), sc = scanned.load(std::memory_order_acquire);
@@ -325,6 +340,8 @@ private:
                         size_t n = std::min<size_t>(strnlen(str, 200), 200);
                         mp[o++] = (uint8_t)n; memcpy(mp + o, str, n); o += n;
                     }
+                    int32_t g0 = gridFirst.load(); uint32_t gb = (uint32_t)gridBeat.load();
+                    memcpy(mp + o, &g0, 4); memcpy(mp + o + 4, &gb, 4); o += 8;       // beat grid, protocol docs
                     sendto(s, mp, o, 0, (sockaddr*)&a, sizeof a);
                 }
             }
