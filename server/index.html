@@ -285,7 +285,8 @@ function marquee(d, title) {
 }
 
 function update(state) {
-  set($status, state.online ? '*** VirtualDJ pripojený ***' : 'Plugin WaveShare neposiela dáta. Beží VirtualDJ a je na decku zapnutý efekt WaveShare?');
+  const net = state.net ? { cable: ' · KÁBEL', wifi: ' · WI-FI' }[state.net.kind] || '' : '';   // link in use, only with --iface
+  set($status, state.online ? '*** VirtualDJ pripojený ***' + net : 'Plugin WaveShare neposiela dáta. Beží VirtualDJ a je na decku zapnutý efekt WaveShare?');
   $status.classList.toggle('bad', !state.online);
   const now = performance.now();
   for (const [id, s] of Object.entries(state.decks)) {
