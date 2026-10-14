@@ -25,5 +25,7 @@ jobs:
       - name: Upload plugin
         uses: actions/upload-artifact@v4
         with:
-          name: WaveShare.bundle
-          path: plugin/WaveShare.bundle
+          name: WaveShare-bundles
+          path: |
+            plugin/WaveShare.bundle
+            plugin/WaveShareClock.bundle

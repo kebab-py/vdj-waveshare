@@ -17,7 +17,7 @@ Works with streaming (TIDAL), since the plugin reads the decoded audio inside Vi
 - BPM as the largest number, plus key, tempo and time left
 - Loop region with length in beats
 - 2 or 4 decks, colored like VirtualDJ: red, blue, green, orange
-- Pre-load: a track on a paused deck gets scanned while another deck plays
+- Pre-load: a track on a paused deck gets scanned while another deck plays, or anytime with WaveShare Clock on the master
 - Phone, tablet and desktop layouts
 - No cloud, no accounts, no npm packages
 
@@ -45,7 +45,7 @@ plugin/build.sh
 node server/server.js
 ```
 
-3. Open VirtualDJ. In the effect list of deck 1 and deck 2, switch on WaveShare.
+3. Open VirtualDJ. In the effect list of deck 1 and deck 2, switch on WaveShare. On the master, switch on WaveShare Clock: it lets WaveShare load tracks while every deck is paused, like the first track of a set.
 4. The server prints addresses like `http://192.168.1.20:7777`. Open one on the lighting operator's device.
 
 Keep the server window open during the set. Close VirtualDJ before you stop the server.
@@ -62,7 +62,7 @@ VirtualDJ ─ WaveShare plugin ─▶ UDP :7778 ─▶ server.js ─▶ HTTP/SSE
 ## Development
 
 ```
-plugin/   WaveShare.cpp (VirtualDJ plugin, C++17), build and test scripts
+plugin/   WaveShare.cpp (deck effect) and WaveShareClock.cpp (master effect), C++17, build and test scripts
 server/   server.js (Node, no dependencies) and index.html (dashboard, single file)
 tools/    udp-test.js: prints raw plugin output
 docs/     docs and the project landing page (GitHub Pages)
