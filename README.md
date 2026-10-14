@@ -20,6 +20,7 @@ Works with streaming (TIDAL), since the plugin reads the decoded audio inside Vi
 - 2 or 4 decks, colored like VirtualDJ: red, blue, green, orange
 - Pre-load: a track on a paused deck gets scanned while another deck plays, or anytime with WaveShare Clock on the master
 - Phone, tablet and desktop layouts, made for touch: pinch zoom, double tap reset, full screen
+- Cable or Wi-Fi: serves on every adapter, or pick one with `--iface`
 - No cloud, no accounts, no npm packages
 
 ## Requirements
@@ -50,6 +51,23 @@ node server/server.js
 4. The server prints addresses like `http://192.168.1.20:7777`. Open one on the lighting operator's device.
 
 Keep the server window open during the set. Close VirtualDJ before you stop the server.
+
+## Cable or Wi-Fi
+
+By default the server listens on every adapter at once: cable, Wi-Fi and `localhost`. The console prints one address per adapter with its type. Open the cable address on the lighting device when a cable is connected, the Wi-Fi address when not. Nothing switches on its own, so no browser gets dropped.
+
+Cable setup: connect the DJ laptop and the lighting PC or tablet with an Ethernet cable (USB or Thunderbolt adapter on the Mac). Both sides get a `169.254.x.x` address on their own, no router needed.
+
+```sh
+node server/server.js --list          # adapters: en0 Wi-Fi, en5 cable (USB 10/100/1000 LAN), ...
+node server/server.js                 # default: every adapter, localhost works
+node server/server.js --iface en5     # only this adapter, waits until it has an address
+node server/server.js --iface auto    # cable if it has an address, else Wi-Fi
+```
+
+`--iface` takes `all`, `auto`, the adapter name, its IP or part of the port name (`--iface usb`). Set `iface` in `CONFIG` in `server.js` to make it permanent. With one adapter, `localhost` does not answer and the dashboard status shows `KÁBEL` or `WI-FI`.
+
+`auto` checks every 2 seconds and moves the server when the cable gets plugged in or pulled out. **A switch drops every connected browser**, and it does not reconnect by itself: open the new address shown in the console. Any port that is not Wi-Fi counts as cable (dock, club Ethernet, phone USB tethering), and a flaky cable makes it flip. Use `auto` only when you know the setup.
 
 ## How it works
 

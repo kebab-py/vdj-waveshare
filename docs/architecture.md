@@ -56,6 +56,7 @@ Node 18+, no npm packages.
 - Deck states: `live` (fresh metadata), `pause` (positions arrive, metadata stale), `off` (nothing arrives).
 - Writes events to `server/server.log` with local date and time: track changes, finished waveforms, pre-load result, loops, plugin silence.
 - Network Control fallback exists but is off (`vdjUrl: ''`). See Known issues.
+- Network adapter (`iface`, `--iface`): `all` (default) listens on every adapter once, as before. Opt-in `auto` serves on the cable if it has an IPv4 address, else on Wi-Fi, one adapter name or IP serves only there. Both check every 2 s; a changed address restarts the HTTP server on it and closes all connections, so browsers must open the new address. Cable = any macOS hardware port that is not Wi-Fi (`networksetup -listallhardwareports`, read again only when the adapter list changes). VPN and virtual adapters come last.
 
 ## Dashboard: `server/index.html`
 
@@ -80,5 +81,6 @@ Single file, no build step, no libraries.
 | Units of `get_loop_in_time` | Assumed ms, not verified with pitch ≠ 0 |
 | `SCALE` in the plugin | Set by eye |
 | Beat grid units (`SongBpm` as track samples per beat) | Assumed, not verified with pitch ≠ 0 |
+| Cable detection on macOS (`--iface auto`) | By port name. A dock, club Ethernet or a phone tethered over USB counts as cable |
 | A track loaded while no deck plays (typical first track of a set) stayed empty until a deck played. VirtualDJ never calls a paused deck's effect | Fixed by WaveShare Clock on the master (confirmed on real VirtualDJ, 14 Oct 2026). Without it: play any deck, even in the headphones |
 | Windows | No build yet |
