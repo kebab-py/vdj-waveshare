@@ -47,7 +47,7 @@ Change `docs/protocol.md` in the same PR. Incompatible changes bump the version 
 
 ## Style
 
-- Comments and docs in English for new code. Older Slovak comments are fine, translate them when you touch the code.
+- Comments and docs in English. User-facing text (dashboard, `server.log` lines) stays Slovak.
 - Prefer the simplest working solution. Mark deliberate shortcuts with a `ponytail:` comment naming the limit.
 - Commit messages: imperative, short. `Fix playhead jump on pause`.
 

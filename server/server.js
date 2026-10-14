@@ -1,6 +1,6 @@
-// VDJ waveform pre osvetľovača. Node 18+, žiadne npm balíčky.
-// Spusti: node server.js        Overenie VDJ príkazov: node server.js --test
-// Waveform posiela plugin WaveShare cez UDP (waveshare/), metadáta Network Control plugin.
+// VirtualDJ waveform for the lighting operator. Node 18+, no npm packages.
+// Run: node server.js        Check VirtualDJ queries: node server.js --test
+// The WaveShare plugin sends waveform and metadata over UDP (plugin/). Network Control is an optional fallback, off.
 const http = require('http');
 const dgram = require('dgram');
 const fs = require('fs');
@@ -9,29 +9,29 @@ const os = require('os');
 const { execFileSync } = require('child_process');
 
 const CONFIG = {
-  // Network Control vypnutý: jeho vlákna zhadzujú VDJ pri zatváraní (crash 13. 10. 21:35, 21:59, 22:57).
-  // Údaje posiela plugin WaveShare. Zapnúť: 'http://127.0.0.1:8080' (port z Network Control pluginu).
+  // Network Control off: its threads crashed VirtualDJ on quit (crashes 13 Oct 21:35, 21:59, 22:57).
+  // The WaveShare plugin sends the data. To switch on: 'http://127.0.0.1:8080' (port of the Network Control plugin).
   vdjUrl: '',
-  vdjPassword: '',                 // ak si v plugine nastavil heslo
-  port: 7777,                      // sem sa pripája osvetľovač
-  udpPort: 7778,                   // sem posiela plugin WaveShare
-  decks: [1, 2, 3, 4],             // decky 3 a 4 sa zobrazia po prepnutí v prehliadači
+  vdjPassword: '',                 // if you set a password in the plugin
+  port: 7777,                      // the lighting operator connects here
+  udpPort: 7778,                   // the WaveShare plugin sends here
+  decks: [1, 2, 3, 4],             // decks 3 and 4 show after switching in the browser
   // Network adapter for the lighting operator. 'all' (default) = every adapter, localhost works.
   // Opt-in: 'auto' = cable when it has an address, else Wi-Fi; switches on its own and drops connected browsers.
   // Or one adapter: name ('en5'), IP ('169.254.3.4') or part of the macOS port name ('USB').
   // Same as: node server.js --iface en5. List adapters: node server.js --list
   iface: 'all',
-  publishMs: 100,                  // stav prehliadačom 10x za sekundu
-  fallbackMs: 1000,                // Network Control iba ako záloha, keď plugin nemá čerstvé údaje
+  publishMs: 100,                  // state to browsers 10 times per second
+  fallbackMs: 1000,                // Network Control only as a fallback when the plugin has no fresh data
 
 };
 
-// Hlavný zdroj údajov je plugin WaveShare (UDP). Network Control je iba záloha, keď žiadny deck nehrá:
-// veľa súbežných HTTP požiadaviek zhodilo VDJ (crash 13. 10. vo vlákne NetworkSocket pri zatváraní okna).
-// Preto: po jednej požiadavke, najviac raz za sekundu, iba pre decky bez čerstvých údajov z pluginu.
-// Nikdy nepridávaj get_loaded_song 'filepath': pri TIDAL skladbe zhodí VDJ.
+// The main data source is the WaveShare plugin (UDP). Network Control is only a fallback when no deck plays:
+// many parallel HTTP requests crashed VirtualDJ (crash 13 Oct in the NetworkSocket thread when closing the window).
+// So: one request at a time, at most once per second, only for decks without fresh plugin data.
+// Never add get_loaded_song 'filepath': it crashes VirtualDJ on a TIDAL track.
 const FIELDS = { title: 'get_title', pos: 'get_position', playing: 'play', audible: 'is_audible', bpm: 'get_bpm' };
-const ONCE = { artist: 'get_artist', key: 'get_key', length: 'get_songlength' };   // iba pri zmene skladby
+const ONCE = { artist: 'get_artist', key: 'get_key', length: 'get_songlength' };   // only when the track changes
 const LOOP = { loopOn: 'loop', loopIn: 'get_loop_in_time', loopOut: 'get_loop_out_time', loopBeats: 'get_active_loop' };
 
 async function q(deck, script) {
@@ -49,7 +49,7 @@ const bool = v => (/^(true|on|yes|1)$/i.test(v) ? true : /^(false|off|no|0)$/i.t
 function parse(raw) {
   const o = {};
   for (const [k, v] of Object.entries(raw)) {
-    if (k === 'pos') { const p = num(v); o.pos = p > 1 ? p / 100 : p; } // ponytail: znesie 0-1 aj 0-100
+    if (k === 'pos') { const p = num(v); o.pos = p > 1 ? p / 100 : p; } // ponytail: accepts both 0-1 and 0-100
     else if (k === 'playing' || k === 'audible') o[k] = bool(v);
     else if (k === 'bpm' || k === 'length' || k === 'loopIn' || k === 'loopOut' || k === 'loopBeats') o[k] = num(v);
     else if (k === 'loopOn') o[k] = v;
@@ -58,14 +58,14 @@ function parse(raw) {
   return o;
 }
 
-async function poll(deck, fields) {               // postupne, nikdy viac požiadaviek naraz
+async function poll(deck, fields) {               // one after another, never several requests at once
   const o = {};
   for (const [k, s] of Object.entries(fields)) o[k] = await q(deck, s);
   return o;
 }
 
-// state ide prehliadaču 10x za sekundu; waveform (wave) zvlášť, iba zmenené stĺpce
-// Log udalostí do server.log vedľa servera: zmeny skladieb, výpadky pluginu, pre-load. Číta ho aj Claude.
+// state goes to browsers 10 times per second; the waveform (wave) separately, changed columns only
+// Event log in server.log next to the server: track changes, plugin silence, pre-load. Claude reads it too.
 const LOG = path.join(__dirname, 'server.log');
 function log(...a) {
   const d = new Date(), local = new Date(d - d.getTimezoneOffset() * 60000);   // local time, not UTC
@@ -73,7 +73,7 @@ function log(...a) {
   console.log(line);
   fs.appendFile(LOG, line + '\n', () => {});
 }
-const seen = {};                                   // posledný zalogovaný stav pre každý deck
+const seen = {};                                   // last logged state per deck
 function watch(d, key, val, msg) {
   const k = d + key;
   if (seen[k] === val) return;
@@ -92,7 +92,7 @@ const clients = new Set();
 function send(msg) { for (const res of clients) res.write(msg); }
 function publish() { send(`data: ${JSON.stringify(state)}\n\n`); }
 
-// ponytail: guard proti prekrývaniu, ak VDJ odpovedá pomaly
+// ponytail: guard against overlapping runs if VirtualDJ answers slowly
 function loop(ms, fn) {
   let busy = false;
   setInterval(async () => {
@@ -102,12 +102,12 @@ function loop(ms, fn) {
   }, ms);
 }
 
-const fresh = w => w.meta && performance.now() - w.meta.t < 1500;   // audio vlákno decku (alebo iného hrajúceho) zbiera údaje
-const alive = w => performance.now() - w.at < 1500;                   // plugin beží (pozícia chodí aj v pauze)
+const fresh = w => w.meta && performance.now() - w.meta.t < 1500;   // the deck's audio thread (or another playing deck's, or the master clock) collects data
+const alive = w => performance.now() - w.at < 1500;                   // plugin runs (positions arrive while paused too)
 let httpOnline = false;
 
-// Stav pre prehliadač. Keď deck stojí a žiadny iný nehrá, VDJ plugin nevolá: metadáta zostarnú,
-// ale pozícia z pluginu chodí ďalej. Vtedy deck = pauza, posledné metadáta, pozícia z pluginu.
+// State for the browser. When a deck is paused and nothing calls the plugin, the metadata gets stale,
+// but positions from the plugin keep coming. Then deck = pause, last metadata, position from the plugin.
 loop(CONFIG.publishMs, async () => {
   const now = performance.now();
   let online = httpOnline;
@@ -123,18 +123,18 @@ loop(CONFIG.publishMs, async () => {
       Object.assign(s, { title: m.title, artist: m.artist, key: m.key, bpm: m.bpm || null, length: m.len || null,
         playing: mode === 'live' && m.playing, audible: m.audible, loop: m.loop, grid: m.grid });
     }
-    if (mode === 'off' && !httpOnline) s.playing = false;           // nič nevieme: zastaviť playhead, nie hádať
-    // Počas prehrávania presná pozícia z pluginu, dopočítaná na čas odoslania.
+    if (mode === 'off' && !httpOnline) s.playing = false;           // we know nothing: stop the playhead, don't guess
+    // While playing: exact position from the plugin, extrapolated to the send time.
     if (s.playing && w.sec != null && now - w.at < 300) { s.sec = w.sec + w.rate * (now - w.at) / 1000; s.rate = w.rate; }
     else if (w.sec != null && mode !== 'off') { s.sec = w.sec; s.rate = 0; }
     else if (httpOnline) { s.sec = (s.pos || 0) * (s.length || 0); s.rate = s.playing ? 1 : 0; }
-    else s.rate = 0;                                                  // posledná známa pozícia ostáva
+    else s.rate = 0;                                                  // the last known position stays
   }
   state.online = online;
   publish();
 });
 
-// záloha cez Network Control: iba decky, o ktorých plugin nič nehlási (napr. keď nič nehrá)
+// Network Control fallback: only decks the plugin reports nothing about (e.g. when nothing plays)
 loop(CONFIG.fallbackMs, async () => {
   if (!CONFIG.vdjUrl) return;
   let ok = false;
@@ -152,7 +152,7 @@ loop(CONFIG.fallbackMs, async () => {
   httpOnline = ok;
 });
 
-// UDP od pluginu WaveShare. Formát: technická dokumentácia, sekcia Prenos na server.
+// UDP from the WaveShare plugin. Format: docs/protocol.md.
 const udp = dgram.createSocket('udp4');
 udp.on('message', b => {
   if (b.length < 12 || b.toString('latin1', 0, 4) !== 'VDJW' || b[4] !== 1) return;
@@ -160,17 +160,17 @@ udp.on('message', b => {
   if (!w) return;
   if (b[5] === 1 && b.length >= 28) {
     const [pos, sr, total, scanned] = [12, 16, 20, 24].map(o => b.readUInt32LE(o));
-    if (id !== w.id || total !== w.have.length) {          // nová skladba: prázdne pole, prehliadač si stiahne /wave
+    if (id !== w.id || total !== w.have.length) {          // new track: empty array, the browser fetches /wave
       w.id = id; w.bins = new Uint8Array(total * 3); w.have = new Uint8Array(total);
       s.rev++; s.total = total;
       // Count only tracks with a length: a load passes through 0 s ids (empty deck, title before length).
       w.revTimes = (w.revTimes || []).filter(t => Date.now() - t < 10000).concat(total ? Date.now() : []);
       log(`deck ${deck}`, `nová skladba #${id}, ${(total / 100).toFixed(0)} s` + (w.revTimes.length > 3 ? ` POZOR: ${w.revTimes.length}x za 10 s, plugin si mýli skladbu` : ''));
     }
-    // rýchlosť prehrávania (pitch) z posledných ~1 s; skok v skladbe históriu vymaže
+    // playback speed (pitch) from the last ~1 s; a jump in the track clears the history
     const sec = pos / (sr || 44100), now = performance.now(), h = w.hist;
     const last = h.at(-1);
-    if (last && (sec === last[1] || Math.abs(sec - (last[1] + w.rate * (now - last[0]) / 1000)) > 0.5)) h.length = 0; // pauza alebo skok
+    if (last && (sec === last[1] || Math.abs(sec - (last[1] + w.rate * (now - last[0]) / 1000)) > 0.5)) h.length = 0; // pause or jump
     h.push([now, sec]);
     while (h.length > 2 && now - h[0][0] > 1000) h.shift();
     if (now - h[0][0] > 200) w.rate = (sec - h[0][1]) / (now - h[0][0]) * 1000;
@@ -199,7 +199,7 @@ udp.on('message', b => {
     if (n <= 0) return;
     const data = b.subarray(18, 18 + n * 3);
     const old = w.bins.subarray(start * 3, (start + n) * 3);
-    if (w.have[start] && w.have[start + n - 1] && Buffer.compare(data, old) === 0) return; // opakovaný kruh, nič nové
+    if (w.have[start] && w.have[start + n - 1] && Buffer.compare(data, old) === 0) return; // repeated ring, nothing new
     old.set(data); w.have.fill(1, start, start + n);
     send(`event: wave\ndata: ${JSON.stringify({ deck, rev: s.rev, start, data: data.toString('base64') })}\n\n`);
   }
@@ -218,7 +218,7 @@ function serve(req, res) {
     req.on('close', () => clients.delete(res));
     return;
   }
-  // celý waveform pre prehliadač, ktorý sa pripojí neskôr: total×3 B stĺpce, potom total B príznaky "spočítané"
+  // whole waveform for a browser that connects later: total×3 B columns, then total B "computed" flags
   const m = url.pathname.match(/^\/wave\/(\d+)$/);
   const w = m && wave[m[1]];
   if (w) {
@@ -321,8 +321,8 @@ function watchNetwork() {
 
 if (process.argv.includes('--test')) {
   (async () => {
-    // node server.js --test                 → všetky príkazy
-    // node server.js --test "get_time"      → iba zadané príkazy
+    // node server.js --test                 → all queries
+    // node server.js --test "get_time"      → only the given queries
     const custom = process.argv.slice(process.argv.indexOf('--test') + 1);
     const list = custom.length ? custom.map(s => ['>', s]) : Object.entries({ ...FIELDS, ...ONCE, ...LOOP });
     console.log(`Pýtam sa ${CONFIG.vdjUrl}, deck 1 (načítaj skladbu a pusti ju):\n`);
