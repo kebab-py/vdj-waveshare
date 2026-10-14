@@ -1,5 +1,5 @@
-// WaveShare: 3-pásmový waveform decku z dekódovaného audia, posiela ho UDP na 127.0.0.1:7778.
-// Zvuk nemení. Formát paketov: technická dokumentácia, sekcia Prenos na server.
+// WaveShare: 3-band waveform of a deck from the decoded audio, sent over UDP to 127.0.0.1:7778.
+// Leaves the sound untouched. Packet format: docs/protocol.md.
 #include <atomic>
 #include <thread>
 #include <cmath>
@@ -14,21 +14,21 @@
 #include <unistd.h>
 #include "vdjDsp8.h"
 
-static const int BPS = 100;                  // stĺpcov za sekundu
+static const int BPS = 100;                  // columns per second
 static const int MAXBINS = 30 * 60 * BPS;    // 30 min
-static const int CHUNK = 8192;               // samplov na jedno volanie VDJ
-static const int PKT_BINS = 400;             // stĺpcov v jednom pakete
+static const int CHUNK = 8192;               // samples per VirtualDJ call
+static const int PKT_BINS = 400;             // columns per packet
 static const float GAIN[3] = {1.f, 1.5f, 2.5f};
-static const float SCALE = 2.f;              // ponytail: kalibrácia výšky stĺpcov, uprav podľa testu
+static const float SCALE = 2.f;              // ponytail: column height calibration, set by eye, adjust after tests
 
-// Pre-load: hrajúci deck skenuje aj skladby na zastavených deckoch (VDJ volá plugin iba počas prehrávania).
+// Pre-load: a playing deck also scans tracks on paused decks (VirtualDJ calls the plugin only while its deck plays).
 class WaveShare;
-static const bool PRELOAD = true;             // false = vypnúť pre-load úplne
-// Test 13. 10.: VDJ dotazy bez "deck N" z cudzieho audio vlákna vracali údaje volajúceho decku.
-// Preto všetky dotazy idú cez q()/qs() s explicitným "deck N" a audio sa pred pre-loadom overí (preloadCheck).
-static std::atomic<int> g_preloadOk{0};       // 0 neoverené, 1 funguje, -1 VDJ vracia audio volajúceho decku
+static const bool PRELOAD = true;             // false = pre-load off completely
+// Test 13 Oct: VirtualDJ queries without "deck N" from another deck's audio thread returned the calling deck's data.
+// So every query goes through q()/qs() with an explicit "deck N", and the audio is checked before pre-load (preloadCheck).
+static std::atomic<int> g_preloadOk{0};       // 0 unchecked, 1 works, -1 VirtualDJ returns the calling deck's audio
 static std::atomic<WaveShare*> g_decks[8];
-static std::atomic<int> g_inTick{0};          // koľko audio vlákien práve siaha na cudzie inštancie
+static std::atomic<int> g_inTick{0};          // how many audio threads are touching other decks' instances right now
 
 // Master clock: VirtualDJ calls effects on the master output even while every deck is paused (probe, 14 Oct 2026),
 // but never calls a paused deck's Buffer DSP. WaveShareClock (plugin/WaveShareClock.cpp, its own bundle on the
@@ -42,7 +42,7 @@ static long long nowMs() {
 class WaveShare : public IVdjPluginBufferDsp8 {
 public:
     HRESULT VDJ_API OnLoad() override {
-        bins = new uint8_t[MAXBINS * 3]();   // jediná alokácia, nikdy v audio vlákne
+        bins = new uint8_t[MAXBINS * 3]();   // the only allocation, never on the audio thread
         return S_OK;
     }
     HRESULT VDJ_API OnGetPluginInfo(TVdjPluginInfo8* info) override {
@@ -67,14 +67,14 @@ public:
     short* VDJ_API OnGetSongBuffer(int songPos, int nb) override {
         playPos.store(songPos, std::memory_order_relaxed);
         ownAt.store(nowMs(), std::memory_order_relaxed);
-        if (!busy.test_and_set()) {                                          // analýza PRED výstupom
+        if (!busy.test_and_set()) {                                          // analysis BEFORE output
             checkTrack(songPos);
             if (total.load() > 0 && scanned.load() < total.load()) scanChunk();
             gatherMeta();
             busy.clear();
         }
         if (PRELOAD) tickOthers();
-        short* out = nullptr;                                                // VDJ môže buffer zdieľať
+        short* out = nullptr;                                                // VirtualDJ may share the buffer
         if (GetSongBuffer(songPos, nb, &out) != S_OK) return nullptr;
         return out;
     }
@@ -85,7 +85,7 @@ private:
     uint8_t* bins = nullptr;
     int deck = 1;
 
-    // VDJ dotaz vždy pre tento deck, aj keď ho volá audio vlákno iného decku
+    // VirtualDJ query always for this deck, even when another deck's audio thread calls it
     double q(const char* c) {
         char cmd[96]; snprintf(cmd, sizeof cmd, "deck %d %s", deck, c);
         double v = 0;
@@ -97,27 +97,27 @@ private:
         if (GetStringInfo(cmd, out, n) != S_OK) out[0] = 0;
     }
 
-    // zdieľané s odosielacím vláknom
+    // shared with the sender thread
     std::atomic<int> playPos{0}, sampleRate{44100}, total{0}, start{0}, scanned{0};
     std::atomic<uint32_t> trackId{0};
     std::atomic<bool> running{false};
-    std::atomic_flag busy = ATOMIC_FLAG_INIT;   // scan stav drží naraz iba jedno vlákno
+    std::atomic_flag busy = ATOMIC_FLAG_INIT;   // only one thread at a time owns the scan state
 
-    // Metadáta decku pre server (namiesto Network Control). Zbiera audio vlákno, posiela odosielacie.
+    // Deck metadata for the server (instead of Network Control). The audio thread collects it, the sender thread sends it.
     struct Meta {
-        uint8_t flags = 0;                       // bit 0 play, 1 audible, 2 loop, 3 pre-load OK, 4 pre-load vypnutý
+        uint8_t flags = 0;                       // bit 0 play, 1 audible, 2 loop, 3 pre-load OK, 4 pre-load off
         float bpm = 0, len = 0, loopIn = 0, loopOut = 0, loopBeats = 0;
         char title[200] = "", artist[200] = "", key[16] = "";
     };
     Meta meta;
     std::mutex metaMx;
 
-    // Diagnostika do server.log: audio vlákno zapíše riadok (ak je voľno), odosielacie ho pošle ako paket typu 4.
+    // Diagnostics for server.log: the audio thread writes a line (if the slot is free), the sender sends it as a type 4 packet.
     char logLine[200] = "";
     std::atomic<bool> logFull{false};
     char lastLog[200] = "";
     void dlog(const char* msg) {
-        if (!strcmp(msg, lastLog) || logFull.load()) return;    // ten istý riadok iba raz
+        if (!strcmp(msg, lastLog) || logFull.load()) return;    // the same line only once
         snprintf(lastLog, sizeof lastLog, "%s", msg);
         snprintf(logLine, sizeof logLine, "%s", msg);
         logFull.store(true);
@@ -125,7 +125,7 @@ private:
     std::chrono::steady_clock::time_point metaAt{};
     std::thread sender;
 
-    // iba audio vlákno
+    // audio thread only
     uint32_t trackHash = 0;
     int perBin = 441, scanBin = 0, scanPos = 0, inBin = 0;
     float a1 = 0, a2 = 0, l1 = 0, l2 = 0, acc[3] = {0, 0, 0};
@@ -134,52 +134,52 @@ private:
         double len = q("get_songlength");
         char t[256];
         qs("get_title", t, sizeof t);
-        uint32_t h = 2166136261u;                                   // FNV-1a z názvu a dĺžky
+        uint32_t h = 2166136261u;                                   // FNV-1a of title and length
         for (char* c = t; *c; c++) h = (h ^ (uint8_t)*c) * 16777619u;
         h ^= (uint32_t)(len * 1000) ^ (uint32_t)SampleRate;
         if (h == trackHash) return;
         trackHash = h;
 
-        scanned.store(0);                                           // odosielač prestane čítať staré dáta
+        scanned.store(0);                                           // sender stops reading the old data
         int sr = SampleRate > 0 ? SampleRate : 44100;
         perBin = sr / BPS;
-        int tot = std::min(MAXBINS, (int)(len * BPS));              // floor: nikdy nečítame za koniec skladby
+        int tot = std::min(MAXBINS, (int)(len * BPS));              // floor: never read past the end of the track
         int st = tot > 0 ? std::clamp(songPos / perBin, 0, tot - 1) : 0;
         if (tot > 0) memset(bins, 0, tot * 3);
         a1 = 1 - std::exp(-2 * (float)M_PI * 200 / sr);
         a2 = 1 - std::exp(-2 * (float)M_PI * 2500 / sr);
         resetFilter();
-        scanBin = st; scanPos = st * perBin;                        // najprv od playheadu po koniec
+        scanBin = st; scanPos = st * perBin;                        // first from the playhead to the end
         sampleRate.store(sr); start.store(st); total.store(tot);
         trackId.fetch_add(1);
     }
 
     void unregister() {
         for (auto& g : g_decks) { WaveShare* e = this; g.compare_exchange_strong(e, nullptr); }
-        while (g_inTick.load()) usleep(1000);   // nikto už na túto inštanciu nesiaha
+        while (g_inTick.load()) usleep(1000);   // nobody touches this instance anymore
     }
 
-    // Volá audio vlákno hrajúceho decku. Zastavený deck: zistí skladbu a pozíciu cez VDJ a skenuje.
+    // Called by a playing deck's audio thread. Paused deck: gets track and position from VirtualDJ and scans.
     void tickOthers() {
         g_inTick++;
         for (auto& g : g_decks) {
             WaveShare* o = g.load();
             if (!o || o == this || o->busy.test_and_set()) continue;
             if (g_preloadOk.load() == 0) preloadCheck(o);
-            o->tickRemote(g_preloadOk.load() == 1);            // metadáta vždy, audio iba ak overené
+            o->tickRemote(g_preloadOk.load() == 1);            // metadata always, audio only once checked
             o->busy.clear();
         }
         g_inTick--;
     }
-    // Vráti VDJ cez inštanciu iného decku jeho audio, alebo audio volajúceho decku? Porovná 1024 framov
-    // z rovnakej pozície. Zhoda = VDJ vracia audio podľa vlákna, pre-load sa vypne. (Rovnaká skladba na oboch
-    // deckoch vypne pre-load tiež, ponytail: zriedkavé, stačí reštart VDJ.)
+    // Does VirtualDJ return the other deck's audio through its instance, or the calling deck's? Compares 1024 frames
+    // at the same position. Match = VirtualDJ returns audio by thread, pre-load switches off. (The same track on both
+    // decks switches pre-load off too, ponytail: rare, a VirtualDJ restart fixes it.)
     int checkFails = 0;
     void preloadCheck(WaveShare* o) {
         double lenA = q("get_songlength"), lenB = o->q("get_songlength");
         if (lenA < 20 || lenB < 20 || SampleRate <= 0) { dlog("preload test: caka na skladby dlhsie ako 20 s na oboch deckoch"); return; }
         int pos = (int)(std::min(lenA, lenB) / 2 * SampleRate);
-        short a[2048];                                                   // 4 kB na zásobníku audio vlákna
+        short a[2048];                                                   // 4 kB on the audio thread's stack
         short* p = nullptr;
         if (GetSongBuffer(pos, 1024, &p) != S_OK || !p) { dlog("preload test: vlastne audio nedostupne"); return; }
         memcpy(a, p, sizeof a);
@@ -199,16 +199,16 @@ private:
 
     void tickRemote(bool scan) {
         double len = q("get_songlength"), frac = q("get_position");
-        if (frac > 1) frac /= 100;                                  // ponytail: znesie 0-1 aj 0-100
-        // ponytail: SampleRate je z poslednej prehrávanej skladby; ak nesedí, pri štarte sa skladba preskenuje
+        if (frac > 1) frac /= 100;                                  // ponytail: accepts both 0-1 and 0-100
+        // ponytail: SampleRate is from the last played track; if it is wrong, the track gets rescanned when it plays
         int pos = (int)(frac * len * (SampleRate > 0 ? SampleRate : 44100));
-        if (std::abs(pos - playPos.load()) > SampleRate / 10) playPos.store(pos);  // presná pozícia z prehrávania má prednosť
+        if (std::abs(pos - playPos.load()) > SampleRate / 10) playPos.store(pos);  // the exact position from playback wins
         checkTrack(playPos.load());
         if (scan && total.load() > 0 && scanned.load() < total.load()) scanChunk();
         gatherMeta();
     }
 
-    // najviac 4× za sekundu; audio vlákno nikdy nečaká na zámok
+    // at most 4 times per second; the audio thread never waits for a lock
     void gatherMeta() {
         auto now = std::chrono::steady_clock::now();
         if (now - metaAt < std::chrono::milliseconds(250)) return;
@@ -217,7 +217,7 @@ private:
         if (get("play") > 0) m.flags |= 1;
         if (get("is_audible") > 0) m.flags |= 2;
         if (get("loop") > 0) m.flags |= 4;
-        int pl = g_preloadOk.load();                                    // stav pre-loadu pre server/log
+        int pl = g_preloadOk.load();                                    // pre-load state for the server and log
         if (pl > 0) m.flags |= 8; else if (pl < 0) m.flags |= 16;
         m.bpm = (float)get("get_bpm");
         m.len = (float)get("get_songlength");
@@ -238,7 +238,7 @@ private:
         int tot = total.load();
         int frames = std::min(CHUNK, tot * perBin - scanPos);
         short* b = nullptr;
-        if (frames <= 0 || GetSongBuffer(scanPos, frames, &b) != S_OK || !b) return;  // skúsi pri ďalšom volaní
+        if (frames <= 0 || GetSongBuffer(scanPos, frames, &b) != S_OK || !b) return;  // retried on the next call
         for (int i = 0; i < frames; i++) {
             float x = (b[2 * i] + b[2 * i + 1]) * (0.5f / 32768.f);
             l1 += a1 * (x - l1); l2 += a2 * (x - l2);
@@ -252,9 +252,9 @@ private:
             acc[0] = acc[1] = acc[2] = 0; inBin = 0;
             scanBin++;
             scanned.fetch_add(1, std::memory_order_release);
-            if (scanned.load() == tot) return;                      // hotovo
-            if (scanBin == tot) {                                   // koniec skladby: pokračuj od začiatku
-                scanBin = 0; scanPos = 0; resetFilter();            // krátky artefakt na začiatku je OK
+            if (scanned.load() == tot) return;                      // done
+            if (scanBin == tot) {                                   // end of track: continue from the start
+                scanBin = 0; scanPos = 0; resetFilter();            // a short artifact at the start is OK
                 return;
             }
         }
@@ -272,10 +272,10 @@ private:
 
     void header(uint8_t* p, uint8_t type, uint32_t id) {
         memcpy(p, "VDJW", 4); p[4] = 1; p[5] = type; p[6] = (uint8_t)deck; p[7] = 0;
-        memcpy(p + 8, &id, 4);                                      // macOS je little-endian
+        memcpy(p + 8, &id, 4);                                      // macOS is little-endian
     }
 
-    // Vlastné vlákno: číta iba pamäť pluginu, nikdy nevolá VDJ.
+    // Own thread: reads plugin memory only, never calls VirtualDJ.
     void sendLoop() {
         int s = socket(AF_INET, SOCK_DGRAM, 0);
         sockaddr_in a{};
@@ -283,7 +283,7 @@ private:
         static_assert(PKT_BINS * 3 + 18 < 1400, "paket musí byť menší než MTU");
         uint8_t p[18 + PKT_BINS * 3];
         uint32_t lastId = ~0u;
-        int sent = 0, ring = 0;                                     // v poradí skenovania od `start`
+        int sent = 0, ring = 0;                                     // in scan order from `start`
         bool dumped = false;
         int tick = 0;
         uint8_t mp[12 + 28 + 3 * 201];
@@ -297,20 +297,20 @@ private:
             sendto(s, p, 28, 0, (sockaddr*)&a, sizeof a);
 
             if (sc > 0 && tot > 0) {
-                bool fresh = sent < sc;                             // nové stĺpce majú prednosť pred kruhom
+                bool fresh = sent < sc;                             // new columns go before the ring
                 int k = fresh ? sent : ring;
                 int b0 = (st + k) % tot;
                 int n = std::min({PKT_BINS, sc - k, tot - b0});
                 uint32_t b0u = b0; uint16_t nu = n;
                 header(p, 2, id); memcpy(p + 12, &b0u, 4); memcpy(p + 16, &nu, 2);
                 memcpy(p + 18, bins + b0 * 3, n * 3);
-                if (trackId.load() == id) {                         // skladba sa medzitým nezmenila
+                if (trackId.load() == id) {                         // the track did not change meanwhile
                     sendto(s, p, 18 + n * 3, 0, (sockaddr*)&a, sizeof a);
                     if (fresh) sent += n; else if ((ring += n) >= sc) ring = 0;
                 }
             }
 
-            if (++tick % 5 == 0) {                                  // metadáta 4× za sekundu
+            if (++tick % 5 == 0) {                                  // metadata 4 times per second
                 Meta m; std::chrono::steady_clock::time_point at;
                 { std::lock_guard<std::mutex> g(metaMx); m = meta; at = metaAt; }
                 if (at.time_since_epoch().count()) {
@@ -329,20 +329,20 @@ private:
                 }
             }
 
-            if (logFull.load()) {                                    // diagnostika pre server.log
+            if (logFull.load()) {                                    // diagnostics for server.log
                 size_t n = strnlen(logLine, sizeof logLine);
                 header(mp, 4, id); memcpy(mp + 12, logLine, n);
                 sendto(s, mp, 12 + n, 0, (sockaddr*)&a, sizeof a);
                 logFull.store(false);
             }
 
-            if (!dumped && tot > 0 && sc == tot) {                  // krok 3: dump na kontrolu
+            if (!dumped && tot > 0 && sc == tot) {                  // dump for checks (host_test reads it)
                 char fn[64];
                 snprintf(fn, sizeof fn, "/tmp/waveshare_deck%d.bin", deck);
                 if (FILE* f = fopen(fn, "wb")) { fwrite(bins, 3, tot, f); fclose(f); }
                 dumped = true;
             }
-            usleep(50000);                                          // 20× za sekundu
+            usleep(50000);                                          // 20 times per second
         }
         close(s);
     }

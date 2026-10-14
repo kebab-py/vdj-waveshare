@@ -3,9 +3,9 @@
 #include "WaveShare.cpp"
 #include <cassert>
 #include <vector>
-// Deck 1 hrá 60 s skladbu (prvá polovica 60 Hz, druhá 6 kHz). Deck 2 má načítanú 30 s skladbu (6 kHz) a stojí.
+// Deck 1 plays a 60 s track (first half 60 Hz, second half 6 kHz). Deck 2 has a 30 s track (6 kHz) loaded and is paused.
 const int SR = 44100;
-bool contaminate = false;                              // simulácia: VDJ vracia audio volajúceho decku
+bool contaminate = false;                              // simulation: VirtualDJ returns the calling deck's audio
 struct CB;
 CB* cb1p = nullptr;
 struct CB : IVdjCallbacks8 {
@@ -40,7 +40,7 @@ std::vector<uint8_t> dump(int deck, int bins) {
 }
 int main(int argc, char** argv) {
   bool clock = argc > 1 && !strcmp(argv[1], "clock");  // ./host_test clock = both decks paused, master clock only
-  contaminate = argc > 1 && !clock;                    // ./host_test x = test vypnutia pre-loadu
+  contaminate = argc > 1 && !clock;                    // ./host_test x = pre-load must switch itself off
   remove("/tmp/waveshare_deck1.bin"); remove("/tmp/waveshare_deck2.bin");
   CB cb1(1, 60, true), cb2(2, 30, false);
   cb1p = &cb1;
@@ -58,16 +58,16 @@ int main(int argc, char** argv) {
     puts("OK (master clock)");
     return 0;
   }
-  int pos = 20 * SR;                                   // deck 1 začne v strede: test wrapu
+  int pos = 20 * SR;                                   // deck 1 starts in the middle: tests the wrap
   for (int i = 0; i < 600; i++) { assert(p1->OnGetSongBuffer(pos, 512)); pos += 512; usleep(5000); }
   usleep(300000);
   auto d = dump(1, 6000);
   printf("deck1 bin 1000 low/mid/high %d %d %d\n", d[3000], d[3001], d[3002]);
   printf("deck1 bin 5000 low/mid/high %d %d %d\n", d[15000], d[15001], d[15002]);
-  assert(d[3000] > 100 && d[3002] < 20);               // 60 Hz: basy
-  assert(d[15002] > 100 && d[15000] < 20);             // 6 kHz: výšky
-  for (int b = 5; b < 6000; b++) assert(d[b*3] + d[b*3+1] + d[b*3+2] > 0);  // žiadna diera
-  if (contaminate) {                                   // pre-load sa musí vypnúť, deck 2 sa nesmie naskenovať
+  assert(d[3000] > 100 && d[3002] < 20);               // 60 Hz: bass
+  assert(d[15002] > 100 && d[15000] < 20);             // 6 kHz: highs
+  for (int b = 5; b < 6000; b++) assert(d[b*3] + d[b*3+1] + d[b*3+2] > 0);  // no gap
+  if (contaminate) {                                   // pre-load must switch off, deck 2 must not get scanned
     assert(g_preloadOk.load() == -1);
     assert(!fopen("/tmp/waveshare_deck2.bin", "rb"));
     p1->OnStop(); p2->OnStop(); p1->Release(); p2->Release();
@@ -75,7 +75,7 @@ int main(int argc, char** argv) {
     return 0;
   }
   assert(g_preloadOk.load() == 1);
-  auto e = dump(2, 3000);                              // deck 2 nehral, aj tak je hotový (pre-load)
+  auto e = dump(2, 3000);                              // deck 2 never played, still done (pre-load)
   printf("deck2 bin 1500 low/mid/high %d %d %d\n", e[4500], e[4501], e[4502]);
   assert(e[4502] > 100);
   p1->OnStop(); p2->OnStop(); p1->Release(); p2->Release();
