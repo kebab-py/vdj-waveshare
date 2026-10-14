@@ -7,3 +7,4 @@ plugin/*.bundle
 server/server.log
 node_modules/
 .DS_Store
+plugin/.installed
