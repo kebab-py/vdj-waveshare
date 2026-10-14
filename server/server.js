@@ -157,7 +157,8 @@ udp.on('message', b => {
     if (id !== w.id || total !== w.have.length) {          // nová skladba: prázdne pole, prehliadač si stiahne /wave
       w.id = id; w.bins = new Uint8Array(total * 3); w.have = new Uint8Array(total);
       s.rev++; s.total = total;
-      w.revTimes = (w.revTimes || []).filter(t => Date.now() - t < 10000).concat(Date.now());
+      // Count only tracks with a length: a load passes through 0 s ids (empty deck, title before length).
+      w.revTimes = (w.revTimes || []).filter(t => Date.now() - t < 10000).concat(total ? Date.now() : []);
       log(`deck ${deck}`, `nová skladba #${id}, ${(total / 100).toFixed(0)} s` + (w.revTimes.length > 3 ? ` POZOR: ${w.revTimes.length}x za 10 s, plugin si mýli skladbu` : ''));
     }
     // rýchlosť prehrávania (pitch) z posledných ~1 s; skok v skladbe históriu vymaže
