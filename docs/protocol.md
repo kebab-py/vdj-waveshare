@@ -61,12 +61,12 @@ UTF-8 text from byte 12. The server writes it into `server/server.log`.
 
 ## HTTP: server to browser
 
-Port `7777`.
+Port `7777`, on every adapter by default. `--iface` limits it to one, see README.
 
 | Route | Returns |
 | --- | --- |
 | `GET /` | `server/index.html` |
-| `GET /events` | SSE. Default event: full state JSON, 10 per second. Event `wave`: `{deck, rev, start, data}` with changed columns as base64 |
+| `GET /events` | SSE. Default event: full state JSON, 10 per second, with `net: {kind, name, ip}` for the adapter in use (`cable`, `wifi`, `other`) when the server runs on one adapter (`--iface`), absent with `all`. Event `wave`: `{deck, rev, start, data}` with changed columns as base64 |
 | `GET /wave/:deck` | Binary: `total × 3` bytes of columns, then `total` bytes of "computed" flags. Header `X-Rev` |
 
 A browser fetches `/wave/:deck` when `rev` changes, then applies `wave` events on top.
