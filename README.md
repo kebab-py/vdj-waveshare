@@ -14,11 +14,12 @@ Works with streaming (TIDAL), since the plugin reads the decoded audio inside Vi
 - Zoom from 2 to 64 seconds, by buttons, mouse wheel or pinch
 - Two views: MIX (bands overlaid) and PÁSMA (bands in separate lanes)
 - Energy strip: dark for breakdowns, bright green for drops
-- BPM as the largest number, plus key, tempo and time left
+- BPM as the largest number in the deck color, plus key, tempo and time left
+- Beat lines synced with the VirtualDJ beat grid, bars brighter
 - Loop region with length in beats
 - 2 or 4 decks, colored like VirtualDJ: red, blue, green, orange
 - Pre-load: a track on a paused deck gets scanned while another deck plays, or anytime with WaveShare Clock on the master
-- Phone, tablet and desktop layouts
+- Phone, tablet and desktop layouts, made for touch: pinch zoom, double tap reset, full screen
 - No cloud, no accounts, no npm packages
 
 ## Requirements

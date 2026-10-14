@@ -2,7 +2,7 @@
 <html lang="sk">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#1c1c2a">
 <title>VDJ waveform</title>
@@ -26,6 +26,8 @@ body {
   display: flex; flex-direction: column; gap: 6px;
   padding: max(6px, env(safe-area-inset-top)) max(6px, env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-left));
   height: 100dvh; overflow: hidden; -webkit-user-select: none; user-select: none;
+  /* tablet: no double-tap zoom, no tap flash, no long-press menu, no pull-to-refresh */
+  touch-action: manipulation; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; overscroll-behavior: none;
 }
 
 /* okno v štýle starého prehrávača: zošikmené hrany, pruhovaný titulok */
@@ -102,6 +104,7 @@ body {
 
 .bpm { display: flex; align-items: baseline; justify-content: center; gap: 8px; padding: 2px 22px 0; font-size: 50px; line-height: 1.05; min-width: 230px; }
 .bpm b { font-weight: 700; }
+.deck .bpm b { color: var(--dk); text-shadow: 0 0 6px var(--dk); }   /* BPM in the deck color */
 .bpm i { font: bold 10px var(--sans); color: #6a8f6a; font-style: normal; letter-spacing: .15em; text-shadow: none; }
 
 .wave { position: relative; flex: 1; min-height: 50px; }
@@ -120,6 +123,16 @@ body {
 }
 @media (max-height: 560px) and (min-width: 701px) { .bpm { font-size: 34px; } .time { font-size: 26px; } .ovw { height: 28px; } }
 #decks.n4 .bpm { font-size: 40px; min-width: 190px; }
+/* touch screens: finger-sized buttons (48 px), bigger labels */
+@media (pointer: coarse) {
+  .btn { min-width: 56px; min-height: 48px; font-size: 15px; padding: 0 14px; }
+  .group { gap: 6px; }
+  .group small { font-size: 11px; }
+  .group .lcd { min-width: 64px; padding: 13px 6px; font-size: 16px; }
+  #main .body { gap: 14px; }
+  #status { padding: 13px 10px; }
+}
+#fs[hidden] { display: none; }
 @media (prefers-reduced-motion: reduce) { .marq.scroll span, .time.soon { animation: none; } }
 </style>
 </head>
@@ -144,6 +157,7 @@ body {
       <button class="btn" id="d2" aria-pressed="true">2</button>
       <button class="btn" id="d4" aria-pressed="false">4</button>
     </div>
+    <button class="btn" id="fs" aria-label="Celá obrazovka" hidden>&#x26F6;</button>
   </div>
 </section>
 <div id="decks"></div>
@@ -200,6 +214,17 @@ document.getElementById('d2').onclick = () => { prefs.n = 2; applyPrefs(); };
 document.getElementById('d4').onclick = () => { prefs.n = 4; applyPrefs(); };
 applyPrefs();
 
+// full screen (tablet): hides the browser bars; button only where the browser supports it
+const $fs = document.getElementById('fs'), root = document.documentElement;
+const fsOn = () => document.fullscreenElement || document.webkitFullscreenElement;
+if (root.requestFullscreen || root.webkitRequestFullscreen) {
+  $fs.hidden = false;
+  $fs.onclick = () => fsOn() ? (document.exitFullscreen || document.webkitExitFullscreen).call(document)
+    : (root.requestFullscreen || root.webkitRequestFullscreen).call(root);
+  const mark = () => $fs.setAttribute('aria-pressed', !!fsOn());
+  document.addEventListener('fullscreenchange', mark); document.addEventListener('webkitfullscreenchange', mark);
+}
+
 // zoom gestom: koliesko/trackpad a dva prsty na tablete
 function gestures(cv) {
   let acc = 0;
@@ -208,9 +233,16 @@ function gestures(cv) {
     acc += e.deltaY;
     if (Math.abs(acc) > 60) { zoomBy(Math.sign(acc)); acc = 0; }
   }, { passive: false });
+  cv.addEventListener('contextmenu', e => e.preventDefault());     // long press: no menu
+  let lastTap = 0, multi = false;                                   // double tap: back to 16 s
+  cv.addEventListener('pointerup', e => {
+    if (e.pointerType !== 'touch') return;
+    if (multi) { lastTap = 0; return; }                             // end of a pinch, not a tap
+    if (e.timeStamp - lastTap < 300) { prefs.zoom = ZOOMS.indexOf(16); applyPrefs(); lastTap = 0; } else lastTap = e.timeStamp;
+  });
   const pts = new Map(); let base = 0;
   const dist = () => { const [a, b] = [...pts.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
-  cv.addEventListener('pointerdown', e => { pts.set(e.pointerId, e); if (pts.size === 2) base = dist(); });
+  cv.addEventListener('pointerdown', e => { pts.set(e.pointerId, e); if (pts.size === 2) { base = dist(); multi = true; } });
   cv.addEventListener('pointermove', e => {
     if (!pts.has(e.pointerId)) return;
     pts.set(e.pointerId, e);
@@ -218,7 +250,7 @@ function gestures(cv) {
     const r = dist() / base;
     if (r > 1.35) { zoomBy(-1); base = dist(); } else if (r < 0.74) { zoomBy(1); base = dist(); }
   });
-  for (const t of ['pointerup', 'pointercancel', 'pointerleave']) cv.addEventListener(t, e => { pts.delete(e.pointerId); base = 0; });
+  for (const t of ['pointerup', 'pointercancel', 'pointerleave']) cv.addEventListener(t, e => { pts.delete(e.pointerId); base = 0; if (!pts.size) setTimeout(() => { multi = false; }); });
 }
 
 function deck(id) {
@@ -421,6 +453,19 @@ function loopBox(ctx, d, w, h, t0, t1, label) {
   }
 }
 
+// Beat lines from the VirtualDJ beat grid: every beat thin, every 4th (bar) bright
+function beatLines(ctx, d, w, h, t0, t1) {
+  const g = d.s.grid; if (!g || !(g.beat > 0.1)) return;
+  const px = devicePixelRatio, perBeat = g.beat / (t1 - t0) * w;
+  for (let n = Math.ceil((t0 - g.first) / g.beat), t; (t = g.first + n * g.beat) <= t1; n++) {
+    if (t < 0) continue;
+    const bar = (n % 4 + 4) % 4 === 0;
+    if (!bar && perBeat < 6 * px) continue;                     // zoomed out: bars only
+    ctx.fillStyle = bar ? 'rgba(255, 255, 255, .5)' : 'rgba(255, 255, 255, .16)';
+    ctx.fillRect(Math.round((t - t0) / (t1 - t0) * w) - (bar ? px : px / 2), 0, bar ? 2 * px : px, h);
+  }
+}
+
 function playhead(ctx, x, h, from = 0) {
   ctx.globalAlpha = 0.5; ctx.fillStyle = '#000'; ctx.fillRect(0, from, x, h - from); ctx.globalAlpha = 1;
   ctx.fillStyle = '#fff'; ctx.fillRect(x - devicePixelRatio, 0, 2 * devicePixelRatio, h);
@@ -447,6 +492,7 @@ function frame() {
         const win = ZOOMS[prefs.zoom], strip = 4 * devicePixelRatio;
         energyStrip(dc, d, w, 0, strip, cur - win / 2, cur + win / 2);
         bars(dc, d, w, h - strip, cur - win / 2, cur + win / 2, prefs.view);
+        beatLines(dc, d, w, h, cur - win / 2, cur + win / 2);
         loopBox(dc, d, w, h, cur - win / 2, cur + win / 2, true);
         playhead(dc, w / 2, h);
         if (!d.ovCache) {                                       // canvas namiesto OffscreenCanvas: starší iPad Safari

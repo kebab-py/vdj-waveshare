@@ -23,6 +23,13 @@ static const float SCALE = 2.f;              // ponytail: kalibrácia výšky st
 
 // Pre-load: hrajúci deck skenuje aj skladby na zastavených deckoch (VDJ volá plugin iba počas prehrávania).
 class WaveShare;
+
+// Beat grid: sample position of beat 0 (the song's first beat) from VirtualDJ's SongPosBeats
+// (beats since the first beat) and SongBpm (samples per beat). Can be negative or past the start.
+static int32_t beatAnchor(int songPos, double posBeats, int samplesPerBeat) {
+    return (int32_t)(songPos - std::llround(posBeats * samplesPerBeat));
+}
+
 static const bool PRELOAD = true;             // false = vypnúť pre-load úplne
 // Test 13. 10.: VDJ dotazy bez "deck N" z cudzieho audio vlákna vracali údaje volajúceho decku.
 // Preto všetky dotazy idú cez q()/qs() s explicitným "deck N" a audio sa pred pre-loadom overí (preloadCheck).
@@ -67,6 +74,10 @@ public:
     short* VDJ_API OnGetSongBuffer(int songPos, int nb) override {
         playPos.store(songPos, std::memory_order_relaxed);
         ownAt.store(nowMs(), std::memory_order_relaxed);
+        if (SongBpm > 0) {                                                  // VDJ fills these before each call
+            gridFirst.store(beatAnchor(songPos, SongPosBeats, SongBpm), std::memory_order_relaxed);
+            gridBeat.store(SongBpm, std::memory_order_relaxed);
+        }
         if (!busy.test_and_set()) {                                          // analýza PRED výstupom
             checkTrack(songPos);
             if (total.load() > 0 && scanned.load() < total.load()) scanChunk();
@@ -100,6 +111,9 @@ private:
     // zdieľané s odosielacím vláknom
     std::atomic<int> playPos{0}, sampleRate{44100}, total{0}, start{0}, scanned{0};
     std::atomic<uint32_t> trackId{0};
+    // ponytail: grid only from this deck's own audio calls; a paused deck gets lines once it plays
+    std::atomic<int32_t> gridFirst{0};
+    std::atomic<int> gridBeat{0};                 // samples per beat, 0 = no grid
     std::atomic<bool> running{false};
     std::atomic_flag busy = ATOMIC_FLAG_INIT;   // scan stav drží naraz iba jedno vlákno
 
@@ -151,6 +165,7 @@ private:
         resetFilter();
         scanBin = st; scanPos = st * perBin;                        // najprv od playheadu po koniec
         sampleRate.store(sr); start.store(st); total.store(tot);
+        gridBeat.store(0);                                          // old grid does not fit the new track
         trackId.fetch_add(1);
     }
 
@@ -286,7 +301,7 @@ private:
         int sent = 0, ring = 0;                                     // v poradí skenovania od `start`
         bool dumped = false;
         int tick = 0;
-        uint8_t mp[12 + 28 + 3 * 201];
+        uint8_t mp[12 + 28 + 3 * 201 + 8];
         while (running.load()) {
             uint32_t id = trackId.load(std::memory_order_acquire);
             int tot = total.load(), st = start.load(), sc = scanned.load(std::memory_order_acquire);
@@ -325,6 +340,8 @@ private:
                         size_t n = std::min<size_t>(strnlen(str, 200), 200);
                         mp[o++] = (uint8_t)n; memcpy(mp + o, str, n); o += n;
                     }
+                    int32_t g0 = gridFirst.load(); uint32_t gb = (uint32_t)gridBeat.load();
+                    memcpy(mp + o, &g0, 4); memcpy(mp + o + 4, &gb, 4); o += 8;       // beat grid, protocol docs
                     sendto(s, mp, o, 0, (sockaddr*)&a, sizeof a);
                 }
             }
