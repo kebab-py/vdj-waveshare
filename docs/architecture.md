@@ -34,7 +34,7 @@ Lessons from testing:
 
 ### Beat grid
 
-`OnGetSongBuffer` reads `SongPosBeats` and `SongBpm` (samples per beat), which VirtualDJ fills before each call of the deck's own audio thread. `beatAnchor()` turns them into the sample position of beat 0. Two atomics carry it to the sender thread, which appends 8 bytes to the metadata packet. A new track resets the grid.
+`OnGetSongBuffer` reads `SongPosBeats` and `SongBpm` (samples per beat), which VirtualDJ fills before each call of the deck's own audio thread. `beatAnchor()` turns them into the sample position of beat 0. Two atomics carry it to the sender thread, which appends 8 bytes to the metadata packet. A new track resets the grid. Lines sit on the beats at pitch 0 and ±8 % (real VirtualDJ, 14 Oct 2026), so `SongBpm` is in track samples, like `songPos`.
 
 Pre-load and the master clock (`tickRemote`) call the plugin from another deck's or the master's thread, where these fields belong to the caller. So they never set the grid. A paused deck driven by the master clock shows its waveform, but no beat lines until it plays once.
 
@@ -80,7 +80,6 @@ Single file, no build step, no libraries.
 | VirtualDJ wiki lists `Documents/VirtualDJ/PluginsArm` as plugin folder | Wrong on current versions. Real path: `~/Library/Application Support/VirtualDJ/PluginsMacArm/SoundEffect` |
 | Units of `get_loop_in_time` | Assumed ms, not verified with pitch ≠ 0 |
 | `SCALE` in the plugin | Set by eye |
-| Beat grid units (`SongBpm` as track samples per beat) | Assumed, not verified with pitch ≠ 0 |
 | Cable detection on macOS (`--iface auto`) | By port name. A dock, club Ethernet or a phone tethered over USB counts as cable |
 | A track loaded while no deck plays (typical first track of a set) stayed empty until a deck played. VirtualDJ never calls a paused deck's effect | Fixed by WaveShare Clock on the master (confirmed on real VirtualDJ, 14 Oct 2026). Without it: play any deck, even in the headphones |
 | Windows | No build yet |
