@@ -31,14 +31,17 @@ if [ $PLUGIN = 1 ]; then
 fi
 
 echo
-changed() { ! git diff --quiet "$OLD" "$NEW" -- "$@"; }
 [ $PLUGIN = 1 ] && echo "VirtualDJ: plugins updated, start VirtualDJ, WaveShare on the decks, WaveShare Clock on the master." || echo "VirtualDJ: no restart needed."
-if changed server/server.js; then
-  pgrep -f server/server.js >/dev/null && echo "Server: RESTART needed (Ctrl+C, then node server/server.js)." \
-    || echo "Server: updated, start it with node server/server.js."
+# Compare the running server's start time with the files' mtime, so a manual git pull is caught too.
+PID=$(pgrep -f server/server.js | head -1)
+if [ -z "$PID" ]; then
+  echo "Server: not running, start it with node server/server.js."
 else
-  echo "Server: no restart needed."
+  START=$(LC_ALL=C date -j -f "%a %b %e %T %Y" "$(LC_ALL=C ps -o lstart= -p "$PID" | xargs)" +%s)
+  newer() { [ "$(stat -f %m "$1")" -gt "$START" ]; }
+  newer server/server.js && echo "Server: RESTART needed, it runs older code (Ctrl+C, then node server/server.js)." \
+    || echo "Server: no restart needed."
+  newer server/index.html && echo "Dashboard: reload the page on every device."
 fi
-changed server/index.html && echo "Dashboard: reload the page on every device."
 [ "$OLD" = "$NEW" ] && echo "Already up to date."
 exit 0
