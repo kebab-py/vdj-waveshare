@@ -1,5 +1,6 @@
 // Simulated VirtualDJ for the plugin logic. Run: plugin/test.sh
 #include <cmath>
+#define UDP_PORT 7779   // not 7778: a running server.js must not see the simulated decks
 #include "WaveShare.cpp"
 #include <cassert>
 #include <vector>

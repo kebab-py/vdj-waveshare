@@ -14,6 +14,10 @@
 #include <unistd.h>
 #include "vdjDsp8.h"
 
+#ifndef UDP_PORT
+#define UDP_PORT 7778                         // server.js udpPort; host_test overrides it
+#endif
+
 static const int BPS = 100;                  // columns per second
 static const int MAXBINS = 30 * 60 * BPS;    // 30 min
 static const int CHUNK = 8192;               // samples per VirtualDJ call
@@ -294,7 +298,7 @@ private:
     void sendLoop() {
         int s = socket(AF_INET, SOCK_DGRAM, 0);
         sockaddr_in a{};
-        a.sin_family = AF_INET; a.sin_port = htons(7778); a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        a.sin_family = AF_INET; a.sin_port = htons(UDP_PORT); a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
         static_assert(PKT_BINS * 3 + 18 < 1400, "paket musí byť menší než MTU");
         uint8_t p[18 + PKT_BINS * 3];
         uint32_t lastId = ~0u;
